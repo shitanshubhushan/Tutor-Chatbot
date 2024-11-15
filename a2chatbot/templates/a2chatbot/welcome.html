@@ -1,0 +1,231 @@
+{% extends "a2chatbot/base.html" %}
+{% load static %}
+
+// Add this in the head of your HTML
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/2.4.1/purify.min.js"></script>
+
+
+{% block user-info %}
+<div style="color:white; font-size: 18px; padding-top: 5pt; padding-right: 5pt;">
+    {{user.username}}
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="chat-container">
+    <!-- Mode Selection -->
+    <div class="mode-selector">
+        <label>Interaction Mode:</label>
+        <select id="modeSelect" onchange="changeMode(this.value)">
+            <option value="tutor_asks" {% if mode == 'tutor_asks' %}selected{% endif %}>Tutor Asks Questions</option>
+            <option value="student_asks" {% if mode == 'student_asks' %}selected{% endif %}>Student Asks Questions</option>
+        </select>
+    </div>
+
+    {% if mode == 'tutor_asks' %}
+    <!-- Question Display Section - Only show in tutor mode -->
+    <div class="question-header">
+        <h3>Current Question: {{question}}</h3>
+        <!-- Question Navigation -->
+        <div class="question-nav">
+            {% if question_id > 1 %}
+            <a href="?q={{ question_id|add:'-1' }}&mode={{ mode }}" class="nav-btn">← Previous</a>
+            {% endif %}
+            {% if question_id < 8 %}
+            <a href="?q={{ question_id|add:'1' }}&mode={{ mode }}" class="nav-btn">Next →</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Chat History -->
+    <div id="chatBox" class="chat-box">
+        {% for message in messages %}
+            <div class="message {% if message.sender == 'student' %}user{% else %}bot{% endif %}">
+                {{ message.content|linebreaks|safe }}
+            </div>
+        {% endfor %}
+    </div>
+
+    <!-- Message Input -->
+    <div class="input-container">
+        <input type="text" id="userInput" placeholder="Type your message...">
+        <button onclick="sendMessage()">Send</button>
+        {% if mode == 'tutor_asks' %}
+        <button onclick="endConversation()" class="end-btn">End Conversation</button>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const form = document.querySelector('form');
+        const chatBox = document.querySelector('.chat-box');
+        const input = document.querySelector('input[type="text"]');
+    
+        form.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            // ... (existing AJAX code) ...
+            
+            response.forEach(reply => {
+                if (reply.bot_message) {
+                    const messageDiv = document.createElement('div');
+                    messageDiv.className = 'message bot';
+                    messageDiv.innerHTML = reply.bot_message;
+                    chatBox.appendChild(messageDiv);
+                }
+            });
+            
+            chatBox.scrollTop = chatBox.scrollHeight;
+        });
+    });
+    </script>
+
+<!-- JavaScript for handling chat functionality -->
+<script>
+    // Auto-scroll to bottom of chat
+    function scrollToBottom() {
+        const chatBox = document.getElementById('chatBox');
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    // Call scrollToBottom on page load
+    scrollToBottom();
+
+    function changeMode(mode) {
+        const currentUrl = new URL(window.location.href);
+        currentUrl.searchParams.set('mode', mode);
+        // Remove question parameter for student mode
+        if (mode === 'student_asks') {
+            currentUrl.searchParams.delete('q');
+        }
+        window.location.href = currentUrl.toString();
+    }
+
+    function sendMessage() {
+        const userInput = document.getElementById('userInput');
+        const message = userInput.value.trim();
+        if (message === '') return;
+
+        // Get current mode and question (if in tutor mode)
+        const urlParams = new URLSearchParams(window.location.search);
+        const currentMode = urlParams.get('mode') || 'tutor_asks';
+        const currentQ = currentMode === 'tutor_asks' ? (urlParams.get('q') || '1') : '1';
+
+        // Immediately show user message
+        addMessageToChat(message, true);
+        userInput.value = '';
+
+        // Send message to server
+        fetch('/sendmessage', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: `message=${encodeURIComponent(message)}&q=${currentQ}&mode=${currentMode}`
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data[0].redirect && currentMode === 'tutor_asks') {
+                window.location.href = data[0].redirect;
+                return;
+            }
+            addMessageToChat(data[0].bot_message, false);
+        });
+    }
+
+    function addMessageToChat(message, isUser) {
+        const chatBox = document.getElementById('chatBox');
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${isUser ? 'user' : 'bot'}`;
+        messageDiv.textContent = message;
+        chatBox.appendChild(messageDiv);
+        scrollToBottom();
+    }
+
+    function endConversation() {
+        const userInput = document.getElementById('userInput');
+        userInput.value = "end conversation";
+        sendMessage();
+    }
+
+    // Get CSRF token from cookies
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    // Handle Enter key press
+    document.getElementById('userInput').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            sendMessage();
+        }
+    });
+</script>
+
+<!-- Additional CSS -->
+<style>
+    .mode-selector {
+        padding: 15px;
+        background-color: #f8f9fa;
+        border-bottom: 1px solid #ddd;
+    }
+
+    .mode-selector select {
+        margin-left: 10px;
+        padding: 5px;
+        border-radius: 4px;
+    }
+
+    .question-header {
+        padding: 15px;
+        background-color: #f8f9fa;
+        border-bottom: 1px solid #ddd;
+    }
+
+    .question-header h3 {
+        margin: 0;
+        color: #333;
+        font-size: 16px;
+    }
+
+    .question-nav {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 10px;
+    }
+
+    .nav-btn {
+        padding: 5px 15px;
+        background-color: #0084ff;
+        color: white;
+        text-decoration: none;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+
+    .nav-btn:hover {
+        background-color: #005bb5;
+    }
+
+    .end-btn {
+        background-color: #dc3545;
+    }
+
+    .end-btn:hover {
+        background-color: #c82333;
+    }
+</style>
+{% endblock %}
